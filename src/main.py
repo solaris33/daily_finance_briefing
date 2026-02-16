@@ -1,6 +1,6 @@
 """Daily market briefing entrypoint.
 
-Phase 1: domestic + overseas section with FinanceDataReader.
+Phase 1: domestic + overseas + forex sections with FinanceDataReader.
 Supports optional target date for reproducible runs in GitHub Actions.
 """
 
@@ -22,6 +22,7 @@ class IndexSummary:
     arrow: str
     color_class: str
     base_date: str | None
+    decimals: int = 2
     error: str | None = None
 
 
@@ -31,10 +32,10 @@ def _parse_target_date(target_date: str | None) -> date | None:
     return datetime.strptime(target_date, "%Y-%m-%d").date()
 
 
-def _format_close(value: float | None) -> str:
+def _format_close(value: float | None, decimals: int) -> str:
     if value is None:
         return "N/A"
-    return f"{value:,.2f}"
+    return f"{value:,.{decimals}f}"
 
 
 def _format_pct(value: float | None) -> str:
@@ -43,7 +44,7 @@ def _format_pct(value: float | None) -> str:
     return f"{abs(value):.2f}%"
 
 
-def fetch_index_summary(name: str, symbol: str, run_date: date) -> IndexSummary:
+def fetch_index_summary(name: str, symbol: str, run_date: date, decimals: int = 2) -> IndexSummary:
     end_dt = datetime.combine(run_date, datetime.min.time())
     start_dt = end_dt - timedelta(days=40)
 
@@ -57,6 +58,7 @@ def fetch_index_summary(name: str, symbol: str, run_date: date) -> IndexSummary:
                 arrow="-",
                 color_class="na",
                 base_date=None,
+                decimals=decimals,
                 error="not-enough-data",
             )
 
@@ -73,6 +75,7 @@ def fetch_index_summary(name: str, symbol: str, run_date: date) -> IndexSummary:
                 arrow="-",
                 color_class="na",
                 base_date=None,
+                decimals=decimals,
                 error="not-enough-close-values",
             )
 
@@ -97,6 +100,7 @@ def fetch_index_summary(name: str, symbol: str, run_date: date) -> IndexSummary:
             arrow=arrow,
             color_class=color_class,
             base_date=last_two.index[-1].strftime("%Y-%m-%d"),
+            decimals=decimals,
         )
     except Exception as exc:  # noqa: BLE001
         return IndexSummary(
@@ -106,6 +110,7 @@ def fetch_index_summary(name: str, symbol: str, run_date: date) -> IndexSummary:
             arrow="-",
             color_class="na",
             base_date=None,
+            decimals=decimals,
             error=str(exc),
         )
 
@@ -118,7 +123,7 @@ def _render_table_rows(items: list[IndexSummary], columns: int) -> str:
         value_row = "".join(
             (
                 "<td>"
-                f'<span class="{item.color_class}">{_format_close(item.close)} {item.arrow} {_format_pct(item.change_pct)}</span>'
+                f'<span class="{item.color_class}">{_format_close(item.close, item.decimals)} {item.arrow} {_format_pct(item.change_pct)}</span>'
                 "</td>"
             )
             for item in row_items
@@ -141,10 +146,11 @@ def _render_section(title: str, items: list[IndexSummary], columns: int) -> str:
 def render_html(
     domestic_items: list[IndexSummary],
     overseas_items: list[IndexSummary],
+    forex_items: list[IndexSummary],
     generated_at: str,
     requested_target_date: str | None,
 ) -> str:
-    all_items = domestic_items + overseas_items
+    all_items = domestic_items + overseas_items + forex_items
     base_dates = [item.base_date for item in all_items if item.base_date]
     base_date_text = max(base_dates) if base_dates else "확인 불가"
     request_date_text = requested_target_date if requested_target_date else "자동(오늘 실행)"
@@ -157,6 +163,7 @@ def render_html(
 
     domestic_html = _render_section("국내", domestic_items, columns=2)
     overseas_html = _render_section("해외", overseas_items, columns=2)
+    forex_html = _render_section("환율", forex_items, columns=2)
 
     return f"""<!doctype html>
 <html lang=\"ko\">
@@ -199,6 +206,7 @@ def render_html(
     <h1>전일 시장 요약</h1>
     {domestic_html}
     {overseas_html}
+    {forex_html}
     <p class=\"meta\">요청 실행일: {request_date_text}</p>
     <p class=\"meta\">기준 거래일: {base_date_text}</p>
     <p class=\"meta\">생성 시각: {generated_at}</p>
@@ -227,13 +235,17 @@ def main() -> None:
         fetch_index_summary("상해 종합", "SSEC", run_date),
         fetch_index_summary("니케이225", "N225", run_date),
     ]
+    forex_items = [
+        fetch_index_summary("원/달러", "USD/KRW", run_date, decimals=2),
+        fetch_index_summary("중국 위안/달러", "USD/CNY", run_date, decimals=3),
+    ]
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     filename_date = run_date.strftime("%Y-%m-%d")
     output_path = output_dir / f"{filename_date}_brief.html"
-    html = render_html(domestic_items, overseas_items, generated_at, args.target_date)
+    html = render_html(domestic_items, overseas_items, forex_items, generated_at, args.target_date)
     output_path.write_text(html, encoding="utf-8")
     print(f"Generated: {output_path}")
 
