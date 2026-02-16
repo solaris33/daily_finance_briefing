@@ -1,6 +1,6 @@
 """Daily market briefing entrypoint.
 
-Phase 1: domestic + overseas + forex sections with FinanceDataReader.
+Phase 1: domestic + overseas + forex + commodity sections with FinanceDataReader.
 Supports optional target date for reproducible runs in GitHub Actions.
 """
 
@@ -147,10 +147,11 @@ def render_html(
     domestic_items: list[IndexSummary],
     overseas_items: list[IndexSummary],
     forex_items: list[IndexSummary],
+    commodity_items: list[IndexSummary],
     generated_at: str,
     requested_target_date: str | None,
 ) -> str:
-    all_items = domestic_items + overseas_items + forex_items
+    all_items = domestic_items + overseas_items + forex_items + commodity_items
     base_dates = [item.base_date for item in all_items if item.base_date]
     base_date_text = max(base_dates) if base_dates else "확인 불가"
     request_date_text = requested_target_date if requested_target_date else "자동(오늘 실행)"
@@ -164,6 +165,7 @@ def render_html(
     domestic_html = _render_section("국내", domestic_items, columns=2)
     overseas_html = _render_section("해외", overseas_items, columns=2)
     forex_html = _render_section("환율", forex_items, columns=2)
+    commodity_html = _render_section("상품", commodity_items, columns=1)
 
     return f"""<!doctype html>
 <html lang=\"ko\">
@@ -207,6 +209,7 @@ def render_html(
     {domestic_html}
     {overseas_html}
     {forex_html}
+    {commodity_html}
     <p class=\"meta\">요청 실행일: {request_date_text}</p>
     <p class=\"meta\">기준 거래일: {base_date_text}</p>
     <p class=\"meta\">생성 시각: {generated_at}</p>
@@ -239,13 +242,25 @@ def main() -> None:
         fetch_index_summary("원/달러", "USD/KRW", run_date, decimals=2),
         fetch_index_summary("중국 위안/달러", "USD/CNY", run_date, decimals=3),
     ]
+    commodity_items = [
+        fetch_index_summary("금", "GC=F", run_date, decimals=2),
+        fetch_index_summary("은", "SI=F", run_date, decimals=2),
+        fetch_index_summary("WTI", "CL=F", run_date, decimals=2),
+    ]
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     filename_date = run_date.strftime("%Y-%m-%d")
     output_path = output_dir / f"{filename_date}_brief.html"
-    html = render_html(domestic_items, overseas_items, forex_items, generated_at, args.target_date)
+    html = render_html(
+        domestic_items,
+        overseas_items,
+        forex_items,
+        commodity_items,
+        generated_at,
+        args.target_date,
+    )
     output_path.write_text(html, encoding="utf-8")
     print(f"Generated: {output_path}")
 
