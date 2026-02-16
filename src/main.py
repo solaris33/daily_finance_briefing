@@ -1,13 +1,14 @@
 """Daily market briefing entrypoint.
 
 Phase 1: implement domestic section (KOSPI/KOSDAQ) with FinanceDataReader.
+Supports optional target date for reproducible runs in GitHub Actions.
 """
 
 from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import FinanceDataReader as fdr
@@ -24,6 +25,12 @@ class IndexSummary:
     error: str | None = None
 
 
+def _parse_target_date(target_date: str | None) -> date | None:
+    if not target_date:
+        return None
+    return datetime.strptime(target_date, "%Y-%m-%d").date()
+
+
 def _format_close(value: float | None) -> str:
     if value is None:
         return "N/A"
@@ -36,11 +43,14 @@ def _format_pct(value: float | None) -> str:
     return f"{abs(value):.2f}%"
 
 
-def fetch_index_summary(name: str, symbol: str) -> IndexSummary:
-    start = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
+def fetch_index_summary(name: str, symbol: str, target_date: date | None) -> IndexSummary:
+    now_dt = datetime.now()
+    end_dt = datetime.combine(target_date, datetime.min.time()) if target_date else now_dt
+    start_dt = end_dt - timedelta(days=40)
+
     try:
-        df = fdr.DataReader(symbol, start)
-        if "Close" not in df.columns or len(df) < 2:
+        df = fdr.DataReader(symbol, start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"))
+        if "Close" not in df.columns:
             return IndexSummary(
                 name=name,
                 close=None,
@@ -51,7 +61,11 @@ def fetch_index_summary(name: str, symbol: str) -> IndexSummary:
                 error="not-enough-data",
             )
 
-        last_two = df["Close"].dropna().tail(2)
+        close_series = df["Close"].dropna()
+        if target_date:
+            close_series = close_series[close_series.index.date <= target_date]
+
+        last_two = close_series.tail(2)
         if len(last_two) < 2:
             return IndexSummary(
                 name=name,
@@ -97,29 +111,20 @@ def fetch_index_summary(name: str, symbol: str) -> IndexSummary:
         )
 
 
-def render_html(items: list[IndexSummary], generated_at: str) -> str:
+def render_html(items: list[IndexSummary], generated_at: str, requested_target_date: str | None) -> str:
     base_dates = [item.base_date for item in items if item.base_date]
     base_date_text = max(base_dates) if base_dates else "확인 불가"
+    request_date_text = requested_target_date if requested_target_date else "자동(최신 거래일 기준)"
 
-    rows_html: list[str] = []
-    for item in items:
-        rows_html.append(
-            f"""
-            <th>{item.name}</th>
-            """.strip()
+    header_row = "\n".join(f"<th>{item.name}</th>" for item in items)
+    value_row = "\n".join(
+        (
+            "<td>"
+            f'<span class="{item.color_class}">{_format_close(item.close)} {item.arrow} {_format_pct(item.change_pct)}</span>'
+            "</td>"
         )
-    header_row = "\n".join(rows_html)
-
-    value_cells: list[str] = []
-    for item in items:
-        value_cells.append(
-            f"""
-            <td>
-              <span class=\"{item.color_class}\">{_format_close(item.close)} {item.arrow} {_format_pct(item.change_pct)}</span>
-            </td>
-            """.strip()
-        )
-    value_row = "\n".join(value_cells)
+        for item in items
+    )
 
     warning = ""
     failed_items = [item for item in items if item.error]
@@ -139,12 +144,8 @@ def render_html(items: list[IndexSummary], generated_at: str) -> str:
         margin: 24px;
         color: #222;
       }}
-      h1 {{
-        margin: 0 0 24px;
-      }}
-      h2 {{
-        margin: 24px 0 8px;
-      }}
+      h1 {{ margin: 0 0 24px; }}
+      h2 {{ margin: 24px 0 8px; }}
       table {{
         width: 100%;
         max-width: 720px;
@@ -157,10 +158,7 @@ def render_html(items: list[IndexSummary], generated_at: str) -> str:
         padding: 14px 10px;
         font-size: 30px;
       }}
-      th {{
-        font-weight: 700;
-        background: #fafafa;
-      }}
+      th {{ font-weight: 700; background: #fafafa; }}
       .up {{ color: #f44336; }}
       .down {{ color: #1976d2; }}
       .flat {{ color: #444; }}
@@ -173,13 +171,10 @@ def render_html(items: list[IndexSummary], generated_at: str) -> str:
     <h1>전일 시장 요약</h1>
     <h2>국내</h2>
     <table>
-      <tr>
-        {header_row}
-      </tr>
-      <tr>
-        {value_row}
-      </tr>
+      <tr>{header_row}</tr>
+      <tr>{value_row}</tr>
     </table>
+    <p class=\"meta\">요청 기준일: {request_date_text}</p>
     <p class=\"meta\">기준 거래일: {base_date_text}</p>
     <p class=\"meta\">생성 시각: {generated_at}</p>
     {warning}
@@ -191,20 +186,22 @@ def render_html(items: list[IndexSummary], generated_at: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default="output")
+    parser.add_argument("--target-date", default=None, help="YYYY-MM-DD 형식. 테스트/재현 실행용")
     args = parser.parse_args()
 
+    target_date = _parse_target_date(args.target_date)
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     items = [
-        fetch_index_summary("코스피", "KS11"),
-        fetch_index_summary("코스닥", "KQ11"),
+        fetch_index_summary("코스피", "KS11", target_date),
+        fetch_index_summary("코스닥", "KQ11", target_date),
     ]
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    file_name = datetime.now().strftime("%Y-%m-%d") + "_brief.html"
-    output_path = output_dir / file_name
-    output_path.write_text(render_html(items, generated_at), encoding="utf-8")
+    filename_date = args.target_date if args.target_date else datetime.now().strftime("%Y-%m-%d")
+    output_path = output_dir / f"{filename_date}_brief.html"
+    output_path.write_text(render_html(items, generated_at, args.target_date), encoding="utf-8")
     print(f"Generated: {output_path}")
 
 

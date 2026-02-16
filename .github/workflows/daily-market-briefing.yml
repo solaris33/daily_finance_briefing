@@ -5,6 +5,11 @@ on:
     # KST 10:00 = UTC 01:00
     - cron: "0 1 * * 1-5"
   workflow_dispatch:
+    inputs:
+      target_date:
+        description: "테스트용 기준일 (YYYY-MM-DD, 예: 2025-02-14)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -36,7 +41,13 @@ jobs:
 
       - name: Generate previous-day market briefing HTML
         run: |
-          python src/main.py --output-dir output
+          TARGET_DATE="${{ github.event.inputs.target_date }}"
+          if [ -n "$TARGET_DATE" ]; then
+            echo "Run with target date: $TARGET_DATE"
+            python src/main.py --output-dir output --target-date "$TARGET_DATE"
+          else
+            python src/main.py --output-dir output
+          fi
 
       - name: Commit generated HTML (if changed)
         run: |
