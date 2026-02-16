@@ -43,9 +43,8 @@ def _format_pct(value: float | None) -> str:
     return f"{abs(value):.2f}%"
 
 
-def fetch_index_summary(name: str, symbol: str, target_date: date | None) -> IndexSummary:
-    now_dt = datetime.now()
-    end_dt = datetime.combine(target_date, datetime.min.time()) if target_date else now_dt
+def fetch_index_summary(name: str, symbol: str, run_date: date) -> IndexSummary:
+    end_dt = datetime.combine(run_date, datetime.min.time())
     start_dt = end_dt - timedelta(days=40)
 
     try:
@@ -62,8 +61,8 @@ def fetch_index_summary(name: str, symbol: str, target_date: date | None) -> Ind
             )
 
         close_series = df["Close"].dropna()
-        if target_date:
-            close_series = close_series[close_series.index.date <= target_date]
+        # "전일 시장 요약" 기준: 실행일(run_date) 당일 데이터는 제외하고 직전 거래일을 기준일로 사용
+        close_series = close_series[close_series.index.date < run_date]
 
         last_two = close_series.tail(2)
         if len(last_two) < 2:
@@ -114,7 +113,7 @@ def fetch_index_summary(name: str, symbol: str, target_date: date | None) -> Ind
 def render_html(items: list[IndexSummary], generated_at: str, requested_target_date: str | None) -> str:
     base_dates = [item.base_date for item in items if item.base_date]
     base_date_text = max(base_dates) if base_dates else "확인 불가"
-    request_date_text = requested_target_date if requested_target_date else "자동(최신 거래일 기준)"
+    request_date_text = requested_target_date if requested_target_date else "자동(오늘 실행)"
 
     header_row = "\n".join(f"<th>{item.name}</th>" for item in items)
     value_row = "\n".join(
@@ -174,7 +173,7 @@ def render_html(items: list[IndexSummary], generated_at: str, requested_target_d
       <tr>{header_row}</tr>
       <tr>{value_row}</tr>
     </table>
-    <p class=\"meta\">요청 기준일: {request_date_text}</p>
+    <p class=\"meta\">요청 실행일: {request_date_text}</p>
     <p class=\"meta\">기준 거래일: {base_date_text}</p>
     <p class=\"meta\">생성 시각: {generated_at}</p>
     {warning}
@@ -186,20 +185,20 @@ def render_html(items: list[IndexSummary], generated_at: str, requested_target_d
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default="output")
-    parser.add_argument("--target-date", default=None, help="YYYY-MM-DD 형식. 테스트/재현 실행용")
+    parser.add_argument("--target-date", default=None, help="YYYY-MM-DD 형식. 테스트/재현 실행용(실행일)")
     args = parser.parse_args()
 
-    target_date = _parse_target_date(args.target_date)
+    run_date = _parse_target_date(args.target_date) or datetime.now().date()
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     items = [
-        fetch_index_summary("코스피", "KS11", target_date),
-        fetch_index_summary("코스닥", "KQ11", target_date),
+        fetch_index_summary("코스피", "KS11", run_date),
+        fetch_index_summary("코스닥", "KQ11", run_date),
     ]
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    filename_date = args.target_date if args.target_date else datetime.now().strftime("%Y-%m-%d")
+    filename_date = run_date.strftime("%Y-%m-%d")
     output_path = output_dir / f"{filename_date}_brief.html"
     output_path.write_text(render_html(items, generated_at, args.target_date), encoding="utf-8")
     print(f"Generated: {output_path}")

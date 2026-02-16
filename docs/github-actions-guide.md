@@ -20,9 +20,10 @@ schedule:
 > 참고: `1-5`는 월~금 실행이며, 공휴일 구분은 별도 로직이 필요합니다.
 
 ## 테스트 실행: target date 지정
-수동 실행(`workflow_dispatch`)에서 `target_date`를 입력하면 해당 날짜까지의 데이터로 계산할 수 있습니다.
+수동 실행(`workflow_dispatch`)에서 `target_date`를 입력하면 해당 날짜를 **실행일(run date)** 로 간주해 계산할 수 있습니다.
 
-- 입력 형식: `YYYY-MM-DD` (예: `2025-02-14`)
+- 입력 형식: `YYYY-MM-DD` (예: `2026-02-10`)
+- 의미: `2026-02-10`을 넣으면 **당일(2/10)은 제외**하고 전일 거래일(2/9)을 기준으로 요약을 생성합니다.
 - 워크플로우 실행 명령:
   - 입력값 있음: `python src/main.py --output-dir output --target-date <YYYY-MM-DD>`
   - 입력값 없음: `python src/main.py --output-dir output`
@@ -30,7 +31,7 @@ schedule:
 로컬에서도 동일하게 재현 가능합니다.
 
 ```bash
-python src/main.py --output-dir output --target-date 2025-02-14
+python src/main.py --output-dir output --target-date 2026-02-10
 ```
 
 ## 현재 구현 범위 (1차)
